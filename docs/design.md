@@ -559,6 +559,51 @@ reliable source is a live browser session's network log.
 So the remaining blocker is not access, throttling, or session binding. All three are
 solved. It is knowing which queryIds to send.
 
+### Why the queryIds could not be recovered
+
+Four avenues were tried and all are closed.
+
+The logged out page carries no queryIds and references no bundles. It is a static teaser.
+
+The authenticated page was fetched successfully, HTTP 200 and 906 KB, and it is not
+authwalled, but it server renders only the top card. Its full visible text is about 1800
+characters: name, headline, current company, location and follower count. Experience and
+Education appear as section headings with no content. It does hold one thing the logged out
+page does not, the untruncated headline, since LinkedIn truncates `description` in the
+JSON-LD but not in the rendered card. It contains no bootstrapped API payloads; the older
+`<code id="bpr-guid-...">` blocks that scrapers historically read are gone from this
+version of the client.
+
+Bundle mining fails because there is nothing to enumerate. The page references exactly nine
+JavaScript files on `static.licdn.com/aero-v1/sc/h/assets/`. All nine were fetched, which
+costs nothing because that host serves them unauthenticated. None contains a string
+matching `voyager<Name>.<32 hex>`. One of them uses the identifier `queryId` three times
+but defines none, so it is the GraphQL client rather than a query registry. The 34 KB file
+that looked like an asset manifest turned out to be a CSS import shim. Profile code loads
+as chunks whose URLs are assembled at runtime, and there is no manifest listing them.
+
+Public sources have none. The values are server generated and rotate on LinkedIn's
+deploys, which is consistent with what third party notes on the Voyager API report.
+
+Capturing from a browser was attempted several times and returned only preload traffic:
+navigation, settings, messaging, premium feature flags, job seeker preferences, and the
+`voyagerIdentityDashProfiles` resolver already documented above. No `ProfileCards` or
+`ProfileComponents` query appeared in any capture.
+
+There is a plausible explanation for that last point. The account's cookie jar carries
+`sdui_ver=sdui-flagship:0.1.51189`, indicating LinkedIn is serving this account a Server
+Driven UI build. Under SDUI the profile sections are described by the server rather than
+assembled by named client queries, so the `ProfileCards` and `ProfileComponents` queries
+that older write ups describe may simply not be issued by this client at all. That would
+explain three independent captures containing none of them. This is a hypothesis, not a
+verified finding, and it would need a capture from an account not enrolled in SDUI to
+confirm.
+
+The practical consequence is that authenticated profile content is reachable in principle,
+since the transport, the session and the throttle are all solved, but the specific queries
+are not obtainable within this project's time budget. The public tier therefore remains the
+production source, and `VOYAGER_ENABLED` stays off.
+
 ## 9. Throttling and caching
 
 - Outbound token bucket: 1 request per 30 seconds sustained, burst of 3, tunable via env.

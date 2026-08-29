@@ -26,15 +26,28 @@ that graph back into a tree is what `app/linkedin/normalizer.py` does, cycles an
 All of that works. A cookie captured in a browser returns HTTP 200 and valid JSON from a
 plain scripted client.
 
-It still cannot back a deployed service, for two reasons found by probing rather than by
-assumption:
+It still cannot back a deployed service, for three reasons found by probing rather than by
+assumption.
 
-1. Sessions die fast. In testing, a fresh session served one request, then began answering
-   every subsequent request with a 302 redirect to the identical URL and an empty body.
-   That happened at one request per thirty seconds, which is slower than a human browsing.
-2. Recovering from that needs a new cookie, and getting a new cookie needs a human in a
-   browser. Programmatic login through `/uas/authenticate` returns `CHALLENGE`, and
-   solving a CAPTCHA without a browser is not possible.
+The endpoints that every public write up points at are retired. Both
+`identity/dash/profiles` and `identity/profileView/{slug}` answer with a 302 to the
+identical URL and an empty body. Worse, calling one kills the session outright: a
+`/voyager/api/me` that succeeded thirty seconds earlier starts failing the same way
+immediately afterwards. The session budget is not a request count, it is whether you touch
+a retired endpoint.
+
+Profile content now comes from GraphQL, and each section needs a `queryId` that LinkedIn
+generates server side and rotates on deploys. The one documented value turned out to be a
+resolver: it maps a vanity slug to a profile URN and returns 1334 bytes containing no
+profile data. The content queryIds could not be recovered. They are absent from the logged
+out page, absent from all nine JavaScript bundles the client loads, not published anywhere,
+and did not appear in browser captures, which returned only preload traffic. The account
+was being served a Server Driven UI build, which may mean this client never issues the
+named profile queries that older write ups describe.
+
+Recovering a dead session needs a new cookie, and that needs a human in a browser.
+Programmatic login through `/uas/authenticate` answers with `CHALLENGE`, and solving a
+CAPTCHA without a browser is not possible.
 
 So the service runs on LinkedIn's logged out public profile page instead. That path needs
 no session, so nothing can rate limit it out of existence mid demo. LinkedIn embeds a
