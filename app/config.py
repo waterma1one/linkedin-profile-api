@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     li_username: str | None = None
     li_password: str | None = None
 
+    # Voyager is off in production. A session survives only a handful of requests and can
+    # be refreshed only by a human with a browser, so it cannot keep a service answering.
+    # Turn it on for fixture capture and local verification. See docs/design.md 8d.
+    voyager_enabled: bool = False
+
     session_path: str = "/data/session.json"
     cache_ttl_seconds: int = 21600
     outbound_rate_seconds: float = 30.0
