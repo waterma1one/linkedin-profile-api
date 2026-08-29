@@ -2,7 +2,7 @@
 arbitrary sections, and an absent field is not an error."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -148,7 +148,7 @@ class ProfileResponse(BaseModel):
     certifications: list[Certification] = Field(default_factory=list)
     languages: list[Language] = Field(default_factory=list)
     # Best-effort sections: populated when present, never scored for completeness.
-    honors: list[dict] = Field(default_factory=list)
-    publications: list[dict] = Field(default_factory=list)
-    projects: list[dict] = Field(default_factory=list)
-    volunteer: list[dict] = Field(default_factory=list)
+    honors: list[dict[str, Any]] = Field(default_factory=list)
+    publications: list[dict[str, Any]] = Field(default_factory=list)
+    projects: list[dict[str, Any]] = Field(default_factory=list)
+    volunteer: list[dict[str, Any]] = Field(default_factory=list)
