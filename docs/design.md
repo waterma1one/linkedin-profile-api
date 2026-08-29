@@ -384,6 +384,60 @@ The profile endpoints themselves could not be confirmed before the soft block to
 Verifying `identity/dash/profiles` against a cooled-down session is a prerequisite for
 Task 7 and may change the endpoint choice.
 
+## 8c. Avenue 1 closed, tier 4 measured (2026-08-29)
+
+Both open questions from section 8b were probed after the client layer was built.
+
+**Avenue 1, a session minted by our own client, is closed.** `POST /uas/authenticate`
+with the throwaway account's credentials returned `login_result: CHALLENGE` with a
+challenge URL. A session that was never issued to a browser does not escape the
+verification gate, it simply meets it earlier. Section 4 already records that challenges
+cannot be solved without a browser, and browser automation is prohibited, so this path
+cannot be reopened for this account. The login code itself behaved correctly and raised
+`CheckpointRequired`, so it stays in the codebase for the case where a future account
+logs in cleanly.
+
+**Tier 4 works from a residential IP and is richer than assumed.** A logged-out request
+for a public profile with no cookies at all returned HTTP 200 and 661 KB of HTML, with no
+authwall and no redirect. The page carries one `application/ld+json` block whose `@graph`
+includes a `Person` node.
+
+Mapping that node onto the required output fields:
+
+| Required field | Source in JSON-LD | Available |
+| --- | --- | --- |
+| name | `name` | yes |
+| headline | `description` | yes |
+| location | `address.addressLocality`, `address.addressCountry` | yes |
+| about | `disambiguatingDescription` | partial |
+| experience | `worksFor[].member` as `OrganizationRole` with dates | yes |
+| education | `alumniOf[].member` as `OrganizationRole` with dates | yes |
+| images | `image.contentUrl` | yes |
+| follower count | `interactionStatistic.userInteractionCount` | yes |
+| skills | absent | no |
+| certifications | absent | no |
+| languages | `knowsLanguage` key present but empty | no |
+
+The three missing sections are absent from the whole document, not only from the JSON-LD.
+A case-insensitive search of the full 661 KB for `skills`, `certification`, `licenses`,
+`languages`, `volunteer`, `honors`, and `publications` returns zero matches, which
+confirms the assessment in section 2. Tier 4 therefore answers seven of the ten required
+fields and cannot answer the rest.
+
+This is the outcome the response schema was built for. Every field is nullable, and
+`meta.completeness` reports per section rather than as one score, so a tier 4 response
+marks skills and certifications `unavailable` and stays truthful instead of failing.
+
+Two questions remain open, and both are now on the critical path:
+
+1. Whether a freshly captured browser cookie used under the 30 second throttle from the
+   very first request avoids the classifier. This is avenue 2 from section 8b and is the
+   only remaining route to skills, certifications, and languages.
+2. Whether the tier 4 path survives from a datacenter IP. It was measured from a
+   residential connection, and section 2 records that the logged-out path is authwalled
+   from datacenters. Railway is a datacenter. This makes deployment a test of the primary
+   data path rather than a final packaging step, so it should be brought forward.
+
 ## 9. Throttling and caching
 
 - Outbound token bucket: 1 request per 30 seconds sustained, burst of 3, tunable via env.
