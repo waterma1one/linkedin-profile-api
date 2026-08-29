@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # Observed from a live LinkedIn web session during fixture capture, then pinned.
     # An invented or stale value is a known bot signal.
-    client_version: str = "1.13.36760"
+    client_version: str = "1.13.46267"
     user_agent: str = DEFAULT_USER_AGENT
 
     @field_validator("api_keys", mode="before")
