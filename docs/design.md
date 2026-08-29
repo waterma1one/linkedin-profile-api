@@ -462,6 +462,51 @@ Two questions remain open, and both are now on the critical path:
    from datacenters. Railway is a datacenter. This makes deployment a test of the primary
    data path rather than a final packaging step, so it should be brought forward.
 
+## 8d. Avenue 2 succeeds, and section 8b was wrong about binding (2026-08-29)
+
+A freshly captured browser cookie was tested from the scripted client. The result
+overturns the central claim of section 8b.
+
+| # | Request, 30 seconds apart | Result |
+| --- | --- | --- |
+| 1 | `GET /voyager/api/me` | HTTP 200, valid JSON, `{data, included}` |
+| 2 | `GET /identity/dash/profiles?q=memberIdentity&...` | HTTP 302 to the identical URL, empty body |
+| 3 | `GET /voyager/api/me`, repeat of request 1 | HTTP 302 to the identical URL, empty body |
+
+The session is not bound to the browser. Request 1 proves a cookie captured in a browser
+works from a plain HTTP client, returning exactly the normalized envelope the normalizer
+was built for. Section 8b concluded that LinkedIn had bound the session to its originating
+browser, but that conclusion was drawn entirely from requests made while the account was
+already soft blocked. The infinite redirect loop recorded there was the soft block, not a
+binding check. Only `li_at` and `JSESSIONID` were sent, per section 8a.
+
+The dash endpoint is genuinely retired. Request 2 self-redirected on a demonstrably
+healthy session, thirty seconds after request 1 succeeded. Section 8b was right about this
+even though its reasoning was contaminated.
+
+The throttle is far tighter than 1 request per 30 seconds. Request 3 repeated a call that
+had worked sixty seconds earlier, at the documented sustained rate, and it failed. The
+session survived three requests. Section 8a's estimate of roughly fifteen requests in three
+minutes was measured on an older session and does not hold here.
+
+The most likely reading is that request 2 poisoned the session rather than the rate alone
+exhausting it. A retired endpoint carrying an obsolete `decorationId` is a request no real
+browser ever makes, so it is a strong automation signal. If that reading is correct, a
+session that touches only endpoints the web client actually uses may survive considerably
+longer, and the practical ceiling is unknown rather than three.
+
+That distinction decides whether Voyager can back the deployed service at all:
+
+- If normal endpoints survive, a low traffic demo backed by the six hour cache and the
+  outbound throttle is workable.
+- If any authenticated session dies after a few requests, Voyager can produce fixtures and
+  prove the technique, but the deployed service has to answer from the public tier.
+
+One useful free result. The logged-out public page contains `urn:li:member:251749025`, so a
+numeric member URN is recoverable with no authenticated request. It is not the `ACoAA` form
+that section 8b records `memberIdentity` as requiring, so whether it can seed the GraphQL
+call is still unverified.
+
 ## 9. Throttling and caching
 
 - Outbound token bucket: 1 request per 30 seconds sustained, burst of 3, tunable via env.
