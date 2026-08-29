@@ -58,7 +58,7 @@ The Voyager client is still in the tree, still under test, and can be switched o
 `VOYAGER_ENABLED=true` when a fresh cookie is available. It is off by default.
 
 The full probing record, including the requests and what each one returned, is in
-`docs/design.md` sections 8a through 8d.
+`docs/design.md` sections 8a through 8f.
 
 ## What you actually get
 
@@ -207,8 +207,10 @@ discards the sections that did parse.
   certifications, languages and the about section entirely.
 - Profile image URLs are signed and expire.
 - Out of network members can resolve to "LinkedIn Member" with most fields withheld.
-- The public path has been verified from a residential IP. Datacenter IPs are treated more
-  suspiciously by LinkedIn and may see an authwall.
+- LinkedIn answers HTTP 999 when it decides it is talking to a bot, and a few requests in
+  quick succession from the deployed service is enough to trigger it. The service retries
+  twice with a jittered backoff and then reports `bot_detected`. Combined with the six hour
+  cache this is fine for sporadic use, but sustained polling will be blocked.
 - Non English locale profiles may parse incompletely.
 - Using the internal API is contrary to LinkedIn's Terms of Service. A dedicated throwaway
   account was used throughout, never a primary profile.

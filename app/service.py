@@ -9,20 +9,30 @@ docs/design.md section 8d for why a session cannot be depended on in production.
 switch that will gate it already exists as settings.voyager_enabled.
 """
 
+import asyncio
+import random
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import httpx
 
 from app.cache import TTLCache
 from app.config import Settings
-from app.errors import ProfileNotFound, UpstreamError
+from app.errors import BotDetected, ProfileNotFound, UpstreamError
 from app.linkedin.public_profile import parse_public_profile
 from app.linkedin.urls import parse_profile_url
 from app.models import ProfileResponse
 from app.ratelimit import TokenBucket
 
 PUBLIC_PROFILE = "https://www.linkedin.com/in/{slug}"
+
+# LinkedIn answers 999 when it thinks it is talking to a bot. Observed from a datacenter
+# IP after a handful of requests in quick succession. Unlike the Voyager path there is no
+# session at stake here, so a short backoff and retry costs nothing and turns a transient
+# block into a slightly slower success.
+BOT_RETRIES = 2
+BOT_BACKOFF_SECONDS = (1.5, 4.0)
 
 
 class ProfileService:
@@ -32,14 +42,16 @@ class ProfileService:
         bucket: TokenBucket,
         settings: Settings,
         http: httpx.AsyncClient,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._cache = cache
         self._bucket = bucket
         self._settings = settings
         self._http = http
+        self._sleep = sleep
 
-    async def _fetch_public(self, slug: str) -> ProfileResponse:
-        page = await self._http.get(
+    async def _get_page(self, slug: str) -> httpx.Response:
+        return await self._http.get(
             PUBLIC_PROFILE.format(slug=slug),
             # A real desktop UA. The probe in design.md 8c returned HTTP 200 with this,
             # and the page is served differently to an obvious bot string.
@@ -50,6 +62,20 @@ class ProfileService:
             },
             follow_redirects=True,
         )
+
+    async def _fetch_public(self, slug: str) -> ProfileResponse:
+        for attempt in range(BOT_RETRIES + 1):
+            page = await self._get_page(slug)
+            if page.status_code != 999:
+                break
+            if attempt == BOT_RETRIES:
+                raise BotDetected(
+                    "LinkedIn returned HTTP 999 for this profile after retrying"
+                )
+            base = BOT_BACKOFF_SECONDS[min(attempt, len(BOT_BACKOFF_SECONDS) - 1)]
+            # Jitter so concurrent callers do not retry in lockstep.
+            await self._sleep(base * (1 + random.random() * 0.3))
+
         if page.status_code == 404:
             raise ProfileNotFound("No public profile at this identifier")
         if "authwall" in str(page.url):

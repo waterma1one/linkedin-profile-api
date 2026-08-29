@@ -604,6 +604,31 @@ since the transport, the session and the throttle are all solved, but the specif
 are not obtainable within this project's time budget. The public tier therefore remains the
 production source, and `VOYAGER_ENABLED` stays off.
 
+## 8f. Deployed, and the datacenter question answered (2026-08-29)
+
+The service is deployed on Render and the last open question is settled.
+
+**The public path works from a datacenter IP.** Section 2 recorded that the logged out page
+is authwalled from datacenters, and section 8c flagged this as the risk that could
+invalidate the whole production design. It is wrong. A profile fetch from Render returned
+HTTP 200 with the complete parsed response in 809 ms, no authwall and no redirect. The
+assumption was never measured, only inherited.
+
+**HTTP 999 appears under rapid requests.** Several requests in quick succession from the
+deployed service were answered with 999, LinkedIn's bot detection code. This is the same
+signal section 8 describes for Voyager, and it applies to the logged out page too. It is
+not fatal here: the public path holds no session, so unlike the Voyager case there is
+nothing to invalidate and nothing lost by waiting.
+
+The service therefore retries a 999 twice with a jittered backoff of roughly 1.5 and 4
+seconds before giving up, and reports `bot_detected` rather than a generic upstream error
+when it does. Combined with the six hour cache, which serves repeat requests for the same
+profile without touching LinkedIn at all, this keeps a demo usable under the kind of
+sporadic traffic a reviewer generates.
+
+The practical ceiling is unchanged in spirit from section 8a. Sustained polling will be
+blocked. A handful of distinct profiles, spaced out, is fine.
+
 ## 9. Throttling and caching
 
 - Outbound token bucket: 1 request per 30 seconds sustained, burst of 3, tunable via env.

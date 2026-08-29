@@ -6,7 +6,7 @@ import respx
 
 from app.cache import TTLCache
 from app.config import Settings
-from app.errors import InvalidProfileURL, ProfileNotFound, UpstreamError
+from app.errors import BotDetected, InvalidProfileURL, ProfileNotFound, UpstreamError
 from app.ratelimit import TokenBucket
 from app.service import ProfileService
 
@@ -25,15 +25,17 @@ _HTML = (
 PROFILE_URL = "https://www.linkedin.com/in/ada"
 
 
-def _service() -> ProfileService:
-    async def no_sleep(_: float) -> None:
-        return None
+async def _no_sleep(_: float) -> None:
+    return None
 
+
+def _service() -> ProfileService:
     return ProfileService(
         TTLCache(ttl_seconds=60),
-        TokenBucket(rate_seconds=1, burst=10, sleep=no_sleep, clock=lambda: 0.0),
+        TokenBucket(rate_seconds=1, burst=10, sleep=_no_sleep, clock=lambda: 0.0),
         Settings(_env_file=None, api_keys=[]),
         httpx.AsyncClient(),
+        sleep=_no_sleep,
     )
 
 
@@ -100,6 +102,29 @@ async def test_server_error_raises_upstream_error():
     respx.get(PROFILE_URL).mock(return_value=httpx.Response(503))
     with pytest.raises(UpstreamError):
         await _service().fetch(PROFILE_URL)
+
+
+@respx.mock
+async def test_a_transient_999_is_retried_and_succeeds():
+    # LinkedIn's bot-detection code. There is no session at stake on the public path, so
+    # backing off and retrying is safe and turns a transient block into a success.
+    route = respx.get(PROFILE_URL)
+    route.side_effect = [
+        httpx.Response(999),
+        httpx.Response(200, text=_HTML),
+    ]
+    response = await _service().fetch(PROFILE_URL)
+    assert response.profile.full_name == "Ada Lovelace"
+    assert route.call_count == 2
+
+
+@respx.mock
+async def test_a_persistent_999_raises_bot_detected_not_a_generic_error():
+    route = respx.get(PROFILE_URL).mock(return_value=httpx.Response(999))
+    with pytest.raises(BotDetected):
+        await _service().fetch(PROFILE_URL)
+    # One initial attempt plus BOT_RETRIES.
+    assert route.call_count == 3
 
 
 async def test_a_non_linkedin_url_is_rejected_before_any_request():
