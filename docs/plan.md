@@ -38,12 +38,51 @@ Every task's requirements implicitly include this section.
 | `app/linkedin/client.py` | `VoyagerClient`: headers, retries, LinkedIn error mapping |
 | `app/linkedin/endpoints.py` | Endpoint URL and `decorationId` builders |
 | `app/linkedin/parsers/*.py` | One pure parser per response section |
-| `app/linkedin/public_fallback.py` | Logged-out HTML plus JSON-LD parsing |
+| `app/linkedin/public_profile.py` | Logged-out HTML plus JSON-LD parsing. Primary source as of the 2026-08-29 revision. |
 | `app/models.py` | Pydantic response schema |
 | `app/cache.py` | TTL cache keyed on `public_identifier` |
 | `app/ratelimit.py` | Outbound token bucket |
 | `app/service.py` | Tier orchestration, completeness and warning assembly |
 | `scripts/capture_fixtures.py` | Live capture plus scrubbing of test fixtures |
+
+---
+
+## Revision, 2026-08-29
+
+Live probing after Task 6 changed the data source picture. The evidence is in
+`docs/design.md` sections 8c and 8d. Three findings drive this revision.
+
+1. Voyager works from a scripted client. A browser cookie returns HTTP 200 and the
+   `{data, included}` envelope, so Tasks 3, 4 and 6 are validated against real traffic.
+   But the session died after three requests at the documented 30 second spacing, and
+   refreshing a cookie needs a human with a browser. Voyager cannot keep a deployed
+   service answering.
+2. `identity/dash/profiles` is retired. It self redirects on a healthy session, so Tier 1
+   as originally written does not exist. Hitting it is also the prime suspect for killing
+   the session, since an obsolete `decorationId` is a request no browser makes.
+3. The logged out public page needs no session at all, returned HTTP 200 from a
+   residential IP, and carries a JSON-LD `Person` node holding five required fields
+   cleanly and two partially.
+
+The decision is that the public tier serves production. The Voyager client stays in the
+codebase, stays under test, captures fixtures wherever a session permits, and its
+production limits are documented in the README. This is the tiered design working as
+intended rather than a retreat from it.
+
+Revised ordering from Task 9 onward:
+
+| Order | Task | Change |
+| --- | --- | --- |
+| 1 | Task 14, public profile source | Promoted to primary and substantially enriched. Do this first. |
+| 2 | Task 12, cache, limiter, API key | Unchanged and still correct. |
+| 3 | Task 13, service orchestration | Tier order inverted: public tier first, Voyager only when a session is configured. |
+| 4 | Task 16, container and deployment | Moved earlier. Section 2 says the logged out path is authwalled from datacenters and Railway is a datacenter, so deploying is a test of the primary data path, not packaging. |
+| 5 | Task 15, integration test | Unchanged. |
+| 6 | Tasks 9, 10, 11, Voyager parsers | Now conditional. Their specs stay correct for the normalized envelope, but they can only be written once Task 7 captures a fixture, which needs a live session. Skip if none is available before the deadline. |
+| 7 | Tasks 17 and 18, README and verification | Unchanged, and the README must carry the section 8d findings. |
+
+Task 7 fixture capture must target the GraphQL endpoint rather than the dash endpoint, and
+must never call `identity/dash/profiles`.
 
 ---
 
@@ -3380,94 +3419,199 @@ git commit -m "feat: orchestrate profile fetching and expose the profile route"
 
 ---
 
-### Task 14: Public fallback tier
+### Task 14: Public profile source (primary)
+
+Revised 2026-08-29. This was specified as a thin degraded fallback. It is now the primary
+data source for the deployed service, so it must extract everything the page actually
+carries rather than the handful of fields the original spec settled for. The field
+mappings below were read off a real captured payload, not inferred. See `docs/design.md`
+sections 8c and 8d.
 
 **Files:**
-- Create: `app/linkedin/public_fallback.py`
+- Create: `app/linkedin/public_profile.py`
 - Modify: `app/service.py`
-- Test: `tests/test_public_fallback.py`
+- Test: `tests/test_public_profile.py`
 
 **Interfaces:**
-- Consumes: `app.models.Profile`, `app.models.Position`, `app.models.Education`
-- Produces: `app.linkedin.public_fallback.parse_public_profile(html: str) -> ProfileResponse`; `ProfileService.fetch` falls back to it when Voyager fails
+- Consumes: `app.models.*`
+- Produces: `app.linkedin.public_profile.parse_public_profile(html: str) -> ProfileResponse`
+
+**Field mapping, verified against a live payload:**
+
+| Output | JSON-LD source | Notes |
+| --- | --- | --- |
+| `full_name` | `name` | |
+| `headline` | `description` | LinkedIn truncates this with a trailing ellipsis |
+| `location.full` | `address.addressLocality` | e.g. `Seattle, Washington, United States` |
+| `location.country` | `address.addressCountry` | |
+| `images.profile` | `image.contentUrl` | |
+| `follower_count` | `interactionStatistic.userInteractionCount` | only when `interactionType` ends `FollowAction` |
+| `experience[]` | `worksFor[]` `name` and `url` | no title, no dates, see below |
+| `education[]` | `alumniOf[]` `name`, `url`, `member.startDate`, `member.endDate` | dates are bare integer years |
+| `languages[]` | `knowsLanguage[]` | present but empty on the sampled profile |
+| `honors[]` | `awards[]` | best effort |
+| `urn` | `urn:li:member:<digits>` scraped from the raw HTML | outside the JSON-LD |
+| `about` | none | absent from the page entirely |
+| `skills`, `certifications` | none | absent from the whole document |
+
+Two traps worth naming, because both were found the hard way.
+
+`jobTitle` is masked. LinkedIn returns asterisks of the right length, literally
+`["********","*******","**********"]`. Do not map it to `headline` as the original spec
+did. Detect the mask and emit a warning instead of writing rubbish into `Position.title`.
+
+`disambiguatingDescription` is a badge, not an about section. It held `Creator, Top Voice`.
+Do not map it to `about`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_public_fallback.py`:
+Create `tests/test_public_profile.py`. The fixture mirrors the real payload, including the
+asterisk-masked `jobTitle` and the empty `OrganizationRole` on `worksFor`.
 
 ```python
 import json
 
-from app.linkedin.public_fallback import parse_public_profile
+from app.linkedin.public_profile import parse_public_profile
 
-_LD = {
-    "@graph": [
+_PERSON = {
+    "@type": "Person",
+    "name": "Ada Lovelace",
+    # LinkedIn masks titles on the logged-out page.
+    "jobTitle": ["********", "*******"],
+    "address": {"addressLocality": "London, England, United Kingdom", "addressCountry": "GB"},
+    "description": "Mathematician. Writer of the first algorithm…",
+    "disambiguatingDescription": "Creator, Top Voice",
+    "image": {"contentUrl": "https://media.licdn.com/dms/image/x.jpg"},
+    "interactionStatistic": {
+        "interactionType": "https://schema.org/FollowAction",
+        "userInteractionCount": 4210,
+    },
+    # member is present but carries no dates, exactly as observed.
+    "worksFor": [
         {
-            "@type": "Person",
-            "name": "Ada Lovelace",
-            "jobTitle": ["Mathematician"],
-            "address": {"addressLocality": "London", "addressCountry": "GB"},
-            "description": "About text",
-            "image": {"contentUrl": "https://media.licdn.com/x.jpg"},
-            "worksFor": [{"name": "Analytical Engines"}],
-            "alumniOf": [{"name": "Cambridge"}],
+            "name": "Analytical Engines",
+            "url": "https://www.linkedin.com/company/analytical-engines",
+            "member": {"@type": "OrganizationRole"},
         }
-    ]
+    ],
+    "alumniOf": [
+        {
+            "name": "Cambridge",
+            "url": "https://www.linkedin.com/school/cambridge/",
+            "member": {"@type": "OrganizationRole", "startDate": 1833, "endDate": 1837},
+        }
+    ],
+    "knowsLanguage": [{"name": "English"}],
+    "awards": ["Order of the Analytical Engine"],
+    "url": "https://www.linkedin.com/in/ada-lovelace",
 }
 
 
-def _html(payload: dict) -> str:
-    return f'<html><script type="application/ld+json">{json.dumps(payload)}</script></html>'
+def _html(person: dict, extra: str = "") -> str:
+    payload = {"@graph": [{"@type": "WebPage"}, person]}
+    return (
+        f'<html>{extra}<script type="application/ld+json">'
+        f"{json.dumps(payload)}</script></html>"
+    )
 
 
-def test_parses_person_from_json_ld():
-    response = parse_public_profile(_html(_LD))
-    assert response.profile.full_name == "Ada Lovelace"
-    assert response.profile.headline == "Mathematician"
-    assert response.profile.about == "About text"
-    assert response.profile.location.full == "London"
+def test_parses_identity_fields():
+    profile = parse_public_profile(_html(_PERSON)).profile
+    assert profile.full_name == "Ada Lovelace"
+    assert profile.headline.startswith("Mathematician.")
+    assert profile.location.full == "London, England, United Kingdom"
+    assert profile.location.country == "GB"
+    assert profile.images.profile[0].url.endswith("x.jpg")
+    assert profile.follower_count == 4210
+
+
+def test_public_identifier_comes_from_the_profile_url():
+    assert parse_public_profile(_html(_PERSON)).profile.public_identifier == "ada-lovelace"
+
+
+def test_member_urn_is_scraped_from_raw_html():
+    html = _html(_PERSON, extra="<span>urn:li:member:251749025</span>")
+    assert parse_public_profile(html).profile.urn == "urn:li:member:251749025"
+
+
+def test_about_is_never_taken_from_the_badge_field():
+    # disambiguatingDescription holds "Creator, Top Voice", which is chrome, not an about.
+    assert parse_public_profile(_html(_PERSON)).profile.about is None
+
+
+def test_masked_job_titles_are_dropped_not_stored():
+    response = parse_public_profile(_html(_PERSON))
+    assert response.experience[0].title is None
     assert response.experience[0].company.name == "Analytical Engines"
-    assert response.education[0].school.name == "Cambridge"
+    assert any(w.reason == "titles_masked" for w in response.meta.warnings)
+
+
+def test_education_keeps_the_years_linkedin_supplies():
+    education = parse_public_profile(_html(_PERSON)).education[0]
+    assert education.school.name == "Cambridge"
+    assert education.start_date.year == 1833
+    assert education.end_date.year == 1837
+
+
+def test_languages_and_honors_are_populated_when_present():
+    response = parse_public_profile(_html(_PERSON))
+    assert response.languages[0].name == "English"
+    assert response.honors
+
+
+def test_completeness_is_honest_about_each_section():
+    completeness = parse_public_profile(_html(_PERSON)).meta.completeness
+    assert completeness["education"] == "full"
+    # No titles and no dates, so experience is partial rather than full.
+    assert completeness["experience"] == "partial"
+    assert completeness["skills"] == "unavailable"
+    assert completeness["certifications"] == "unavailable"
 
 
 def test_marks_the_data_source_as_public():
-    assert parse_public_profile(_html(_LD)).meta.data_source == "public_jsonld"
-
-
-def test_sections_absent_from_json_ld_are_unavailable():
-    response = parse_public_profile(_html(_LD))
-    assert response.meta.completeness["skills"] == "unavailable"
+    assert parse_public_profile(_html(_PERSON)).meta.data_source == "public_jsonld"
 
 
 def test_html_without_json_ld_yields_an_empty_profile():
     response = parse_public_profile("<html><body>authwall</body></html>")
     assert response.profile.full_name is None
+    assert response.meta.completeness["experience"] == "unavailable"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/test_public_fallback.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'app.linkedin.public_fallback'`
+Run: `pytest tests/test_public_profile.py -v`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.linkedin.public_profile'`
 
-- [ ] **Step 3: Create `app/linkedin/public_fallback.py`**
+- [ ] **Step 3: Create `app/linkedin/public_profile.py`**
 
 ```python
-"""Degraded fallback: parse the logged-out public profile page.
+"""Parse the logged-out public profile page.
 
-Still browserless - this is a plain HTTP GET plus HTML parsing. LinkedIn embeds a
-schema.org Person object in a JSON-LD script tag on public profile pages. The data is
-much thinner than Voyager's, but returning something beats returning an error.
+Still browserless: a plain HTTP GET plus HTML parsing. LinkedIn embeds a schema.org
+Person object in a JSON-LD script tag on public profile pages. This is the primary source
+for the deployed service, because it needs no session and so cannot be rate limited out of
+existence the way an authenticated Voyager session is. See docs/design.md sections 8c/8d.
+
+The page withholds three of the required sections outright and masks position titles, so
+this module's job is to take everything that is genuinely there and to be explicit in
+meta.completeness about everything that is not.
 """
 
 import json
+import re
 from typing import Any
 
 from selectolax.parser import HTMLParser
 
+from app.errors import InvalidProfileURL
+from app.linkedin.urls import parse_profile_url
 from app.models import (
     Company,
     Education,
     Image,
+    Language,
+    LinkedInDate,
     Meta,
     Position,
     Profile,
@@ -3476,7 +3620,10 @@ from app.models import (
     SectionWarning,
 )
 
-PUBLIC_SECTIONS = ("experience", "education", "skills", "certifications", "languages")
+SECTIONS = ("experience", "education", "skills", "certifications", "languages")
+
+# The numeric member URN appears in the page markup, outside the JSON-LD block.
+_MEMBER_URN = re.compile(r"urn:li:member:\d+")
 
 
 def _person(html: str) -> dict[str, Any] | None:
@@ -3486,158 +3633,272 @@ def _person(html: str) -> dict[str, Any] | None:
             payload = json.loads(node.text())
         except json.JSONDecodeError:
             continue
-        for candidate in payload.get("@graph", []) if isinstance(payload, dict) else []:
+        if not isinstance(payload, dict):
+            continue
+        graph = payload.get("@graph")
+        for candidate in graph if isinstance(graph, list) else [payload]:
             if isinstance(candidate, dict) and candidate.get("@type") == "Person":
                 return candidate
-        if isinstance(payload, dict) and payload.get("@type") == "Person":
-            return payload
     return None
 
 
-def _first(value: Any) -> str | None:
+def _text(value: Any) -> str | None:
     if isinstance(value, list):
-        return next((item for item in value if isinstance(item, str)), None)
-    return value if isinstance(value, str) else None
+        value = next((item for item in value if isinstance(item, str)), None)
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def _is_masked(value: Any) -> bool:
+    """LinkedIn returns job titles as asterisks of the right length on this page."""
+    return isinstance(value, str) and bool(value) and set(value) == {"*"}
+
+
+def _year(value: Any) -> LinkedInDate | None:
+    """LinkedIn supplies bare integer years here, never a full date."""
+    if isinstance(value, int):
+        return LinkedInDate(year=value)
+    if isinstance(value, str) and value.isdigit():
+        return LinkedInDate(year=int(value))
+    return None
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _followers(person: dict[str, Any]) -> int | None:
+    stat = person.get("interactionStatistic")
+    for entry in stat if isinstance(stat, list) else [stat]:
+        entry = _dict(entry)
+        if str(entry.get("interactionType", "")).endswith("FollowAction"):
+            count = entry.get("userInteractionCount")
+            if isinstance(count, int):
+                return count
+    return None
+
+
+def _empty(reason: str) -> ProfileResponse:
+    return ProfileResponse(
+        meta=Meta(
+            data_source="public_jsonld",
+            completeness=dict.fromkeys(SECTIONS, "unavailable"),  # type: ignore[arg-type]
+            warnings=[SectionWarning(section="all", reason=reason)],
+        )
+    )
 
 
 def parse_public_profile(html: str) -> ProfileResponse:
     person = _person(html)
     if person is None:
-        return ProfileResponse(
-            meta=Meta(
-                data_source="public_jsonld",
-                completeness=dict.fromkeys(PUBLIC_SECTIONS, "unavailable"),  # type: ignore[arg-type]
-                warnings=[SectionWarning(section="all", reason="no_json_ld_found")],
-            )
-        )
+        return _empty("no_json_ld_found")
 
-    address = person.get("address") if isinstance(person.get("address"), dict) else {}
-    image = person.get("image") if isinstance(person.get("image"), dict) else {}
+    warnings: list[SectionWarning] = []
+    address = _dict(person.get("address"))
+    image = _dict(person.get("image"))
 
     profile = Profile(
-        full_name=_first(person.get("name")),
-        headline=_first(person.get("jobTitle")),
-        about=_first(person.get("description")),
+        full_name=_text(person.get("name")),
+        # description holds the headline. It arrives truncated with a trailing ellipsis.
+        headline=_text(person.get("description")),
+        # There is no about text on this page. disambiguatingDescription is a badge
+        # such as "Creator, Top Voice", so mapping it here would invent data.
+        about=None,
+        follower_count=_followers(person),
     )
-    profile.location.full = address.get("addressLocality")
-    profile.location.country = address.get("addressCountry")
+    profile.location.full = _text(address.get("addressLocality"))
+    profile.location.country = _text(address.get("addressCountry"))
     if isinstance(image.get("contentUrl"), str):
         profile.images.profile.append(Image(url=image["contentUrl"]))
 
-    experience = [
-        Position(company=Company(name=item.get("name")))
-        for item in person.get("worksFor", [])
-        if isinstance(item, dict) and item.get("name")
-    ]
-    education = [
-        Education(school=School(name=item.get("name")))
-        for item in person.get("alumniOf", [])
-        if isinstance(item, dict) and item.get("name")
-    ]
+    for key in ("url", "sameAs"):
+        try:
+            profile.public_identifier = parse_profile_url(str(person.get(key)))
+            break
+        except InvalidProfileURL:
+            continue
 
-    completeness: dict[str, str] = dict.fromkeys(PUBLIC_SECTIONS, "unavailable")
+    found_urn = _MEMBER_URN.search(html)
+    if found_urn:
+        profile.urn = found_urn.group(0)
+
+    experience: list[Position] = []
+    for item in person.get("worksFor") or []:
+        item = _dict(item)
+        if not item.get("name"):
+            continue
+        experience.append(
+            Position(
+                # Titles are masked on this page, so leave it null rather than store "****".
+                title=None,
+                company=Company(name=_text(item.get("name")), linkedin_url=_text(item.get("url"))),
+            )
+        )
+    if any(_is_masked(t) for t in person.get("jobTitle") or []):
+        warnings.append(
+            SectionWarning(
+                section="experience",
+                reason="titles_masked",
+                detail="LinkedIn masks position titles on the logged-out page",
+            )
+        )
+
+    education: list[Education] = []
+    for item in person.get("alumniOf") or []:
+        item = _dict(item)
+        if not item.get("name"):
+            continue
+        member = _dict(item.get("member"))
+        education.append(
+            Education(
+                school=School(name=_text(item.get("name")), linkedin_url=_text(item.get("url"))),
+                start_date=_year(member.get("startDate")),
+                end_date=_year(member.get("endDate")),
+            )
+        )
+
+    languages = [
+        Language(name=name)
+        for name in (
+            _text(entry) or _text(_dict(entry).get("name"))
+            for entry in person.get("knowsLanguage") or []
+        )
+        if name
+    ]
+    honors = [{"name": _text(a)} for a in person.get("awards") or [] if _text(a)]
+
+    completeness: dict[str, str] = dict.fromkeys(SECTIONS, "unavailable")
     if experience:
+        # Company names only. No titles and no dates, so never "full".
         completeness["experience"] = "partial"
     if education:
-        completeness["education"] = "partial"
+        completeness["education"] = "full" if any(e.start_date for e in education) else "partial"
+    if languages:
+        completeness["languages"] = "partial"
+
+    warnings.append(
+        SectionWarning(
+            section="all",
+            reason="public_source",
+            detail="Served from the logged-out public page; skills and certifications are not exposed there",
+        )
+    )
 
     return ProfileResponse(
         meta=Meta(
             data_source="public_jsonld",
             completeness=completeness,  # type: ignore[arg-type]
-            warnings=[
-                SectionWarning(
-                    section="all",
-                    reason="degraded_source",
-                    detail="Served from the logged-out public page; most fields unavailable",
-                )
-            ],
+            warnings=warnings,
         ),
         profile=profile,
         experience=experience,
         education=education,
+        languages=languages,
+        honors=honors,
     )
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pytest tests/test_public_fallback.py -v`
-Expected: PASS, 4 passed
+Run: `pytest tests/test_public_profile.py -v`
+Expected: PASS, 10 passed
 
-- [ ] **Step 5: Wire the fallback into `ProfileService.fetch`**
+- [ ] **Step 5: Wire the public source in as the primary path**
 
-In `app/service.py`, add to the imports:
+Revised 2026-08-29. The original step tried `dash_profile` first and treated the public
+page as a last resort. That ordering is now wrong twice over: the dash endpoint is retired,
+and calling it is the prime suspect for killing the session. The order inverts.
+
+**Never call `dash_profile` from the service.** It is kept in `endpoints.py` only so the
+retirement stays documented and testable.
+
+Add a switch to `app/config.py`:
+
+```python
+    # Voyager is off in production. A session survives only a handful of requests and can
+    # be refreshed only by a human with a browser, so it cannot keep a service answering.
+    # Turn it on for fixture capture and local verification. See docs/design.md 8d.
+    voyager_enabled: bool = False
+```
+
+In `app/service.py`:
 
 ```python
 import httpx
 
+from app.config import Settings
 from app.errors import LinkedInError, ProfileNotFound
-from app.linkedin.endpoints import legacy_profile_view
-from app.linkedin.public_fallback import parse_public_profile
-```
+from app.linkedin.public_profile import parse_public_profile
 
-Change the `ProfileService.__init__` signature to accept the HTTP client, and add the two
-fallback helpers:
+PUBLIC_PROFILE = "https://www.linkedin.com/in/{slug}"
 
-```python
+
     def __init__(
         self, client: Fetcher, cache: TTLCache, bucket: TokenBucket,
-        http: httpx.AsyncClient | None = None,
+        settings: Settings, http: httpx.AsyncClient,
     ) -> None:
         self._client = client
         self._cache = cache
         self._bucket = bucket
+        self._settings = settings
         self._http = http
 
-    async def _fetch_payload(self, slug: str) -> tuple[dict[str, Any], str]:
-        """Try tier 1, then tier 3. Returns the payload and the tier that served it.
-
-        Tier 2 (targeted supplementary calls for truncated collections) is not
-        implemented; truncation is reported through meta.completeness instead.
-        """
-        path, params = dash_profile(slug)
-        try:
-            return await self._client.get_json(path, params, referer_slug=slug), "voyager_dash"
-        except ProfileNotFound:
-            raise
-        except LinkedInError:
-            await self._bucket.acquire()
-            legacy_path, legacy_params = legacy_profile_view(slug)
-            payload = await self._client.get_json(
-                legacy_path, legacy_params, referer_slug=slug
-            )
-            return payload, "voyager_legacy"
-
-    async def _public_fallback(self, slug: str, url: str) -> ProfileResponse:
-        if self._http is None:
-            raise UpstreamError("All Voyager tiers failed and no HTTP client is configured")
+    async def _fetch_public(self, slug: str) -> ProfileResponse:
+        """Primary source. No session, so nothing here can be rate limited into failure."""
         page = await self._http.get(
-            f"https://www.linkedin.com/in/{slug}",
-            headers={"user-agent": "Mozilla/5.0 (compatible; profile-api/0.1)"},
+            PUBLIC_PROFILE.format(slug=slug),
+            # A real desktop UA. The probe in design 8c returned 200 with this and the
+            # page is served differently to an obvious bot string.
+            headers={
+                "user-agent": self._settings.user_agent,
+                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "accept-language": "en-US,en;q=0.9",
+            },
             follow_redirects=True,
         )
-        response = parse_public_profile(page.text)
-        response.meta.requested_url = url
-        response.meta.public_identifier = slug
-        return response
-```
+        if page.status_code == 404:
+            raise ProfileNotFound("No public profile at this identifier")
+        if "authwall" in str(page.url) or page.status_code >= 400:
+            raise UpstreamError(f"Public page unavailable (HTTP {page.status_code})")
+        return parse_public_profile(page.text)
 
-In `fetch`, replace the direct call with the tier chain, and use the returned tier name
-where `data_source` was previously hard-coded to `"voyager_dash"`:
+    async def _fetch_voyager(self, slug: str) -> tuple[dict[str, Any], str] | None:
+        """Optional enrichment. Returns None when Voyager is off or unusable.
 
-```python
+        The endpoint used here must be one Task 7 has verified against a live session.
+        Do not reintroduce dash_profile.
+        """
+        if not self._settings.voyager_enabled:
+            return None
+        await self._bucket.acquire()
         try:
-            payload, tier = await self._fetch_payload(slug)
+            path, params = legacy_profile_view(slug)
+            return await self._client.get_json(path, params, referer_slug=slug), "voyager_legacy"
         except ProfileNotFound:
             raise
         except LinkedInError:
-            return await self._public_fallback(slug, url)
+            # A dead session must never take the response down: the public tier already
+            # answered, so degrade silently and say so in meta.
+            return None
 ```
 
-Then in the `Meta(...)` construction change `data_source="voyager_dash"` to
-`data_source=tier`.
+`fetch` runs the public source first, then upgrades if Voyager is both enabled and
+working:
 
-In `app/main.py`, pass the client through: `ProfileService(VoyagerClient(...), TTLCache(...), TokenBucket(...), http)`.
+```python
+        response = await self._fetch_public(slug)
+        enriched = await self._fetch_voyager(slug)
+        if enriched is not None:
+            payload, tier = enriched
+            response = self._merge_voyager(response, payload, tier)
+        response.meta.requested_url = url
+        response.meta.public_identifier = slug
+```
+
+`data_source` is `"public_jsonld"` unless Voyager supplied the upgrade, in which case it
+is the tier name that served it.
+
+In `app/main.py`, pass both through:
+`ProfileService(VoyagerClient(...), TTLCache(...), TokenBucket(...), settings, http)`.
 
 - [ ] **Step 6: Adapt the legacy payload shape**
 

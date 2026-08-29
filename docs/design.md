@@ -71,7 +71,7 @@ app/
       skills.py
       certifications.py
       languages.py
-    public_fallback.py    logged-out HTML + JSON-LD parsing
+    public_profile.py     logged-out HTML + JSON-LD parsing (primary source)
   models.py               Pydantic response schema
   cache.py                TTL cache keyed by public_identifier
   ratelimit.py            outbound token bucket
