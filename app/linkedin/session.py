@@ -109,9 +109,10 @@ class SessionProvider:
     def _persist(self, session: LinkedInSession) -> None:
         path = Path(self._settings.session_path)
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(session.to_dict()))
-            os.chmod(path, 0o600)
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(json.dumps(session.to_dict()))
         except OSError:
             # A read-only filesystem must not take the service down; the session
             # still works for the lifetime of this process.
