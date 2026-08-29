@@ -3,10 +3,11 @@
 Revised 2026-08-29. The public logged-out page is the primary source. It needs no session,
 so unlike Voyager it cannot be rate limited out of existence mid-demo.
 
-Voyager enrichment is deliberately not wired in here yet. It needs the section parsers
-from Tasks 9 to 11, which need a captured fixture, which needs a live session. See
-docs/design.md section 8d for why a session cannot be depended on in production. The
-switch that will gate it already exists as settings.voyager_enabled.
+Voyager enrichment is deliberately not wired in. Fetching profile content over Voyager
+needs GraphQL queryIds that could not be recovered, so there is nothing here to switch on.
+docs/design.md sections 8d and 8e record what was tried. The Voyager client, session
+provider and normalizer stay in the tree as the reverse engineering record and remain under
+test, but the serving path does not use them.
 """
 
 import asyncio
@@ -86,14 +87,17 @@ class ProfileService:
 
     async def fetch(self, url: str) -> ProfileResponse:
         slug = parse_profile_url(url)
+        started = time.monotonic()
 
         cached = self._cache.get(slug)
         if cached is not None:
             response = ProfileResponse.model_validate(cached)
             response.meta.cache_hit = True
+            # Report how long this call took, not how long the original fetch took.
+            # Reusing the stored duration would tell a caller a cache hit cost seconds.
+            response.meta.duration_ms = int((time.monotonic() - started) * 1000)
             return response
 
-        started = time.monotonic()
         await self._bucket.acquire()
         response = await self._fetch_public(slug)
 

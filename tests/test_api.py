@@ -83,4 +83,3 @@ def test_health_reports_the_active_data_source():
     body = _client().get("/health").json()
     assert body["status"] == "ok"
     assert body["data_source"] == "public_jsonld"
-    assert body["voyager_enabled"] is False

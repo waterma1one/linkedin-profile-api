@@ -5,33 +5,20 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.deps import enforce_inbound_limit, require_api_key
-from app.config import Settings, get_settings
 from app.models import ProfileResponse
 
 router = APIRouter()
 
 
-def _session_status(settings: Settings) -> dict[str, object]:
-    """Describe the auth path without ever revealing a credential value."""
-    if settings.li_at:
-        source = "env_cookie"
-    elif settings.li_username and settings.li_password:
-        source = "programmatic_login"
-    else:
-        source = "unconfigured"
-    return {"source": source, "checkpoint_blocking": False}
-
-
 @router.get("/health")
 async def health() -> dict[str, object]:
-    settings = get_settings()
-    return {
-        "status": "ok",
-        "session": _session_status(settings),
-        # The public page is the production source; Voyager is opt-in. See design.md 8d.
-        "data_source": "public_jsonld",
-        "voyager_enabled": settings.voyager_enabled,
-    }
+    """Liveness and the source profiles are actually served from.
+
+    Deliberately does not report session or credential state. The service answers from the
+    logged-out public page and holds no LinkedIn session, so anything it said about cookies
+    or login would describe a path it never takes. It also never returns a secret value.
+    """
+    return {"status": "ok", "data_source": "public_jsonld"}
 
 
 @router.get(

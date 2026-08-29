@@ -54,8 +54,9 @@ no session, so nothing can rate limit it out of existence mid demo. LinkedIn emb
 schema.org `Person` object in a JSON-LD script tag on those pages, and
 `app/linkedin/public_profile.py` parses it.
 
-The Voyager client is still in the tree, still under test, and can be switched on with
-`VOYAGER_ENABLED=true` when a fresh cookie is available. It is off by default.
+The Voyager client, session provider and normalizer are still in the tree and still under
+test. They are the reverse engineering itself and they work, but the serving path does not
+call them, because without the profile queryIds there is no content endpoint to call.
 
 The full probing record, including the requests and what each one returned, is in
 `docs/design.md` sections 8a through 8f.
@@ -138,7 +139,6 @@ Everything is read from the environment through `app/config.py`. No other module
 | `CACHE_TTL_SECONDS` | 21600 | How long a fetched profile is reused |
 | `OUTBOUND_RATE_SECONDS` | 30 | Sustained delay between outbound calls |
 | `INBOUND_RATE_PER_MINUTE` | 20 | Per caller request cap |
-| `VOYAGER_ENABLED` | false | Opt in to the authenticated path |
 | `LI_AT`, `LI_JSESSIONID` | empty | LinkedIn cookies, only used when Voyager is enabled |
 | `LI_USERNAME`, `LI_PASSWORD` | empty | Programmatic login, which currently hits a CAPTCHA |
 
