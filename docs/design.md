@@ -428,8 +428,7 @@ CI runs `ruff`, `mypy`, and `pytest` on GitHub Actions.
 - Base image `python:3.12-slim`, running as a non-root user under `uvicorn`
 - Railway: persistent volume mounted at `/data`, healthcheck on `/health`, environment
   variables stored as platform secrets
-- `.gitignore` excludes `.env`, `/data`, `CLAUDE.md`, the challenge PDF, and unscrubbed
-  fixtures
+- `.gitignore` excludes `.env`, `/data`, the challenge PDF, and unscrubbed fixtures
 - `.env.example` documents every variable name with empty values
 - Pre-push check greps staged content for `li_at`, `JSESSIONID`, and `ajax:` patterns
 
