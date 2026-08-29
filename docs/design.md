@@ -407,22 +407,46 @@ Mapping that node onto the required output fields:
 | Required field | Source in JSON-LD | Available |
 | --- | --- | --- |
 | name | `name` | yes |
-| headline | `description` | yes |
+| headline | `description`, truncated by LinkedIn with a trailing ellipsis | partial |
 | location | `address.addressLocality`, `address.addressCountry` | yes |
-| about | `disambiguatingDescription` | partial |
-| experience | `worksFor[].member` as `OrganizationRole` with dates | yes |
-| education | `alumniOf[].member` as `OrganizationRole` with dates | yes |
 | images | `image.contentUrl` | yes |
 | follower count | `interactionStatistic.userInteractionCount` | yes |
+| education | `alumniOf[]` name and url, plus `member.startDate` and `member.endDate` | yes |
+| experience | `worksFor[]` name and url only | partial |
+| about | not present | no |
 | skills | absent | no |
 | certifications | absent | no |
 | languages | `knowsLanguage` key present but empty | no |
 
-The three missing sections are absent from the whole document, not only from the JSON-LD.
-A case-insensitive search of the full 661 KB for `skills`, `certification`, `licenses`,
+Three details make tier 4 weaker than a first reading of the payload suggests, and all
+three were verified against the raw bytes on disk rather than inferred.
+
+`jobTitle` is masked. LinkedIn returns it as asterisks of the right length and nothing
+else, literally `"jobTitle":["********","*******","**********"]`. Position titles are
+therefore not recoverable from this page, which is the single biggest gap, since an
+experience entry without a title is close to useless.
+
+`worksFor[].member` carries no dates. The `OrganizationRole` object is present but empty,
+so employment start and end dates are unavailable. Education is the exception and does
+carry real dates, 1973 and 1975 in the sampled profile.
+
+`disambiguatingDescription` is a badge, not an about section. It held `Creator, Top Voice`,
+which is profile chrome. There is no about text on the page at all, and `description`
+holds a truncated headline rather than the about section.
+
+The missing sections are absent from the whole document, not only from the JSON-LD. A
+case-insensitive search of the full 661 KB for `skills`, `certification`, `licenses`,
 `languages`, `volunteer`, `honors`, and `publications` returns zero matches, which
-confirms the assessment in section 2. Tier 4 therefore answers seven of the ten required
-fields and cannot answer the rest.
+confirms the assessment in section 2.
+
+Tier 4 therefore answers five of the required fields cleanly, two partially, and cannot
+answer the rest. That is a weaker result than the earlier reading of this payload, and it
+raises the value of avenue 2 accordingly.
+
+One caveat on sampling. This was measured against a single profile belonging to an
+Influencer and Creator account, which may be more public than a typical member. Field
+availability should be re-measured against an ordinary profile before the parser is
+treated as finished.
 
 This is the outcome the response schema was built for. Every field is nullable, and
 `meta.completeness` reports per section rather than as one score, so a tier 4 response
