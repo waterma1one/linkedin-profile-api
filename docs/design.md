@@ -463,8 +463,8 @@ Two questions remain open, and both are now on the critical path:
    only remaining route to skills, certifications, and languages.
 2. Whether the tier 4 path survives from a datacenter IP. It was measured from a
    residential connection, and section 2 records that the logged-out path is authwalled
-   from datacenters. Railway is a datacenter. This makes deployment a test of the primary
-   data path rather than a final packaging step, so it should be brought forward.
+   from datacenters, and any PaaS host is a datacenter. This makes deployment a test of the
+   primary data path rather than a final packaging step, so it should be brought forward.
 
 ## 8d. Avenue 2 succeeds, and section 8b was wrong about binding (2026-08-29)
 
@@ -646,8 +646,11 @@ CI runs `ruff`, `mypy`, and `pytest` on GitHub Actions.
 ## 11. Deployment
 
 - Base image `python:3.12-slim`, running as a non-root user under `uvicorn`
-- Railway: persistent volume mounted at `/data`, healthcheck on `/health`, environment
-  variables stored as platform secrets
+- Render, deployed from `render.yaml` as a Docker web service, healthcheck on `/health`,
+  environment variables stored as platform secrets. The free plan has no persistent disk,
+  so `SESSION_PATH` points at `/tmp`. That only affects the optional Voyager path, which
+  is off by default, and `SessionProvider` already tolerates a read-only or ephemeral
+  location.
 - `.gitignore` excludes `.env`, `/data`, the challenge PDF, and unscrubbed fixtures
 - `.env.example` documents every variable name with empty values
 - Pre-push check greps staged content for `li_at`, `JSESSIONID`, and `ajax:` patterns

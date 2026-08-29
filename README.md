@@ -116,6 +116,17 @@ curl -H "X-API-Key: devkey" \
   "http://localhost:8000/api/v1/profile?url=https://www.linkedin.com/in/some-person"
 ```
 
+## Deploying
+
+`render.yaml` describes the service, so on Render it is New, then Blueprint, then point it
+at this repository. It builds the Dockerfile, health checks `/health`, and picks up the
+non-secret environment defaults from the blueprint. Set `API_KEYS` in the dashboard;
+the blueprint marks it `sync: false` so it is never read from the repository.
+
+The container listens on `$PORT` and runs as an unprivileged user. The free plan has no
+persistent disk, so `SESSION_PATH` points at `/tmp`, which only matters for the optional
+Voyager path.
+
 ## Configuration
 
 Everything is read from the environment through `app/config.py`. No other module touches

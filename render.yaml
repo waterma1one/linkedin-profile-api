@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: linkedin-profile-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # Set in the Render dashboard, never in this file.
+      - key: API_KEYS
+        sync: false
+      - key: CACHE_TTL_SECONDS
+        value: "21600"
+      - key: OUTBOUND_RATE_SECONDS
+        value: "30"
+      - key: INBOUND_RATE_PER_MINUTE
+        value: "20"
+      # The public tier needs no session. Leave this off unless a fresh cookie is loaded.
+      - key: VOYAGER_ENABLED
+        value: "false"
+      # Render has no persistent disk on the free plan, so keep the session cache in /tmp.
+      - key: SESSION_PATH
+        value: /tmp/session.json
