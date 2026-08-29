@@ -1,14 +1,12 @@
 # LinkedIn Profile API Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Build and deploy an HTTPS API that accepts a LinkedIn profile URL and returns the profile as structured JSON, fetched by direct HTTP calls to LinkedIn's internal Voyager API with no browser involved.
 
 **Architecture:** A FastAPI service wraps a `VoyagerClient` that authenticates with LinkedIn session cookies. Responses arrive as a flat, normalized object graph which a dedicated normalizer resolves into a nested tree; six pure parsers then map that tree into Pydantic models. A four-tier fetch strategy degrades gracefully rather than erroring when LinkedIn withholds data.
 
 **Tech Stack:** Python 3.12, FastAPI, httpx, Pydantic v2, pydantic-settings, tenacity, respx (tests), pytest, ruff, mypy, Docker, Railway.
 
-**Spec:** `docs/superpowers/specs/2026-08-28-linkedin-profile-api-design.md`
+**Spec:** `docs/design.md`
 
 ## Global Constraints
 
@@ -17,7 +15,6 @@ Every task's requirements implicitly include this section.
 - Python 3.12. Target `python:3.12-slim` in the container.
 - **No browser automation.** Playwright, Puppeteer, Selenium, and headless Chrome are prohibited by the challenge brief. Do not add them as dependencies for any reason, including tests.
 - **No secrets in the repository.** All credentials come from environment variables. `.env` is git-ignored; `.env.example` holds variable names with empty values.
-- **No AI attribution in any commit message, PR body, or repository file.** No `Co-Authored-By` trailers, no "generated with" footers. A `commit-msg` hook in `.git/hooks/` enforces this locally.
 - All configuration is read through `app/config.py`. No module reads `os.environ` directly.
 - Parsers perform no I/O. They accept a dictionary and return models.
 - Every response field is nullable. An absent field is never an error.
@@ -3915,7 +3912,6 @@ __pycache__
 .env.*
 data
 *.pdf
-CLAUDE.md
 ```
 
 - [ ] **Step 3: Create `.github/workflows/ci.yml`**
@@ -4020,37 +4016,27 @@ git commit -m "docs: add README with setup, API reference, approach, and limitat
 
 ### Task 18: Pre-submission verification
 
-- [ ] **Step 1: Confirm no AI attribution anywhere in history**
-
-Run:
-```bash
-git log --format='%an <%ae>%n%cn <%ce>%n%B' \
-  | grep -iE 'claude|anthropic|co-authored-by|generated with' \
-  && echo "BLOCKED" || echo "clean"
-```
-Expected: `clean`
-
-- [ ] **Step 2: Confirm no secrets are tracked**
+- [ ] **Step 1: Confirm no secrets are tracked**
 
 Run:
 ```bash
 git ls-files | xargs grep -lIE 'li_at=[A-Za-z0-9]{20}|AQED[A-Za-z0-9]{20}|ajax:[0-9]{15}' \
   && echo "BLOCKED" || echo "clean"
-git ls-files | grep -E '^\.env$|^data/|\.pdf$|CLAUDE\.md' && echo "BLOCKED" || echo "clean"
+git ls-files | grep -E '^\.env$|^data/|\.pdf$' && echo "BLOCKED" || echo "clean"
 ```
 Expected: `clean` for both
 
-- [ ] **Step 3: Confirm the full suite passes**
+- [ ] **Step 2: Confirm the full suite passes**
 
 Run: `ruff check app tests && mypy app && pytest -v`
 Expected: all pass
 
-- [ ] **Step 4: Confirm the live deployment answers**
+- [ ] **Step 3: Confirm the live deployment answers**
 
 Run the two `curl` commands from Task 16 Step 7 against the production URL.
 Expected: HTTP 200 with populated JSON.
 
-- [ ] **Step 5: Push and submit**
+- [ ] **Step 4: Push and submit**
 
 ```bash
 git push -u origin main
