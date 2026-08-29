@@ -511,6 +511,54 @@ numeric member URN is recoverable with no authenticated request. It is not the `
 that section 8b records `memberIdentity` as requiring, so whether it can seed the GraphQL
 call is still unverified.
 
+## 8e. What actually kills a session, and the queryId problem (2026-08-29)
+
+A second fresh cookie was spent on the GraphQL endpoint. Both open questions from section
+8d are now answered, and one of them was answered the wrong way round.
+
+| Request | Result | Session afterwards |
+| --- | --- | --- |
+| `GET /voyager/api/me` | HTTP 200, JSON | alive |
+| `GET /graphql` with a valid `queryId` | HTTP 200, JSON | alive |
+| `GET /identity/dash/profiles?q=memberIdentity` | HTTP 302 to itself | dead |
+| `GET /identity/profileView/{slug}` | HTTP 302 to itself | dead |
+
+The session budget is not a request count. Touching a retired endpoint kills the session
+immediately, and legitimate endpoints leave it healthy. The GraphQL call in this run was
+followed thirty seconds later by a successful `/me`, where in section 8d the same control
+failed after a dash call. Section 8d's guess that request 2 poisoned the session rather
+than the rate exhausting it is confirmed, and the "three request ceiling" recorded there
+was an artefact of what was requested, not how often.
+
+This also retires Tier 3. `identity/profileView` self redirects exactly like the dash
+endpoint, so the legacy REST path in section 5 does not exist either. Both surviving
+endpoints are GraphQL or `/me`.
+
+The GraphQL call succeeded with the **vanity slug**, not the `ACoAA` member URN that
+section 8b assumed was required, so no separate resolution step is needed to call it.
+
+However, the query recorded in section 8b is a resolver, not a profile fetch. It returns
+only a pointer:
+
+```jsonc
+"identityDashProfilesByMemberIdentity": {
+  "*elements": ["urn:li:fsd_profile:ACoAAA8BYqEB..."]
+}
+```
+
+with a single `included` entry holding nothing but `entityUrn` and `versionTag`. Total
+payload 1334 bytes. It does usefully hand over the `ACoAA` URN for free, but it carries no
+name, headline, positions, or skills.
+
+Fetching profile content needs further queryIds, one per profile card or section. These
+are server generated, they rotate on LinkedIn's deploys, and they are not published
+anywhere. They cannot be mined from the logged out page, which is a static teaser
+containing no bundle references, and no current values are recoverable by search. The only
+reliable source is a live browser session's network log.
+
+So the remaining blocker is not access, throttling, or session binding. All three are
+solved. It is knowing which queryIds to send.
+
 ## 9. Throttling and caching
 
 - Outbound token bucket: 1 request per 30 seconds sustained, burst of 3, tunable via env.
