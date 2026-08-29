@@ -1,8 +1,16 @@
 # LinkedIn Profile API — Design Specification
 
 **Date:** 2026-08-28
-**Status:** Approved
+**Status:** Approved, then substantially revised by live probing
 **Deadline:** 2026-08-31
+
+> Read this with section 8 in mind. Sections 1 to 13 are the design as approved on
+> 2026-08-28, before any of it had been tested against LinkedIn. Sections 8a through 8f are
+> dated findings from probing the live API, and several of them overturn decisions made
+> above: the Voyager REST endpoints named in section 5 are retired, tier 3 does not exist,
+> and the logged-out page in section 2 is not authwalled from datacenters. Section 8f
+> describes what actually shipped. The original text is kept rather than rewritten because
+> the gap between the two is the substance of the reverse engineering.
 
 ## 1. Problem
 
@@ -59,26 +67,26 @@ app/
     routes.py             GET /api/v1/profile, GET /health
     deps.py               API-key guard, rate-limit dependency
   linkedin/
+    public_profile.py     logged-out HTML + JSON-LD parsing. The source that ships.
+    urls.py               profile URL -> public identifier
     session.py            SessionProvider: resolve / validate / invalidate
     login.py              programmatic login via /uas/authenticate
-    client.py             VoyagerClient: headers, retries, backoff, error mapping
-    endpoints.py          URL and decorationId builders
+    client.py             VoyagerClient: headers, retries, error mapping
+    endpoints.py          Voyager endpoint and GraphQL URL builders
     normalizer.py         included[] URN graph -> nested tree
-    parsers/
-      profile.py          identity, location, images
-      experience.py
-      education.py
-      skills.py
-      certifications.py
-      languages.py
-    public_profile.py     logged-out HTML + JSON-LD parsing (primary source)
+  service.py              orchestration: URL parse, cache, throttle, fetch
   models.py               Pydantic response schema
   cache.py                TTL cache keyed by public_identifier
-  ratelimit.py            outbound token bucket
+  ratelimit.py            outbound token bucket, inbound per-caller limiter
 tests/
-  fixtures/               captured Voyager payloads, PII-scrubbed
+  fixtures/               captured page markup, scrubbed
   ...
 ```
+
+The six per-section Voyager parsers in the original plan were never written. They would
+have consumed a normalized Voyager payload, and section 8e records why no such payload can
+be fetched. The five Voyager modules above are complete and tested but are not on the
+serving path; they are the reverse engineering, and they are kept as the record of it.
 
 Design constraint: parsers perform no I/O. Each takes a resolved dictionary and returns
 typed models, making every parser testable offline against a fixture.
@@ -351,7 +359,7 @@ Consequences for the design:
   deployed service answering. Tier 4 (unauthenticated public HTML) is the only path
   currently proven to work from a scripted client.
 - Deployment to a datacenter IP is strictly more suspicious than a residential one, so
-  live Voyager access from Railway should be treated as best-effort, not assumed.
+  live Voyager access from a deployed host should be treated as best-effort, not assumed.
 - Probing must obey the same throttle as production. The soft block was self-inflicted by
   roughly 15 requests in three minutes.
 
@@ -713,7 +721,7 @@ To be documented in the README:
 | --- | --- |
 | Fri 28 Aug | Scaffold, session layer, login flow, Voyager client, capture fixtures, normalizer |
 | Sat 29 Aug | Six parsers, Pydantic models, routes, cache, limiter, API key, tests |
-| Sun 30 Aug | Public fallback tier, Railway deployment, README |
+| Sun 30 Aug | Public fallback tier, Render deployment, README |
 | Mon 31 Aug | Buffer and submission |
 
 Fixture capture is scheduled on day one because every later task depends on having real

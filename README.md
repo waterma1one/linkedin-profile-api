@@ -9,6 +9,21 @@ Playwright, no Selenium, no headless Chrome. It is plain HTTP requests and parsi
 GET /api/v1/profile?url=https://www.linkedin.com/in/some-person
 ```
 
+## Live
+
+<https://linkedin-profile-api-8f8m.onrender.com>
+
+```bash
+curl -H "X-API-Key: <key>" \
+  "https://linkedin-profile-api-8f8m.onrender.com/api/v1/profile?url=https://www.linkedin.com/in/williamhgates"
+```
+
+`/health` needs no key. Interactive OpenAPI documentation is at `/docs`.
+
+It is on a free tier, so the first request after an idle period wakes the container and
+takes a few seconds. That first request is also a live fetch rather than a cache hit, so
+it is the one most likely to meet LinkedIn's rate limiting; asking again usually succeeds.
+
 ## Approach
 
 LinkedIn's own web client is backed by an undocumented internal API under `/voyager/api/`.

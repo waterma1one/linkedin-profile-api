@@ -4,7 +4,7 @@
 
 **Architecture:** A FastAPI service wraps a `VoyagerClient` that authenticates with LinkedIn session cookies. Responses arrive as a flat, normalized object graph which a dedicated normalizer resolves into a nested tree; six pure parsers then map that tree into Pydantic models. A four-tier fetch strategy degrades gracefully rather than erroring when LinkedIn withholds data.
 
-**Tech Stack:** Python 3.12, FastAPI, httpx, Pydantic v2, pydantic-settings, tenacity, respx (tests), pytest, ruff, mypy, Docker, Railway.
+**Tech Stack:** Python 3.12, FastAPI, httpx, Pydantic v2, pydantic-settings, tenacity, respx (tests), pytest, ruff, mypy, Docker, Render.
 
 **Spec:** `docs/design.md`
 
@@ -76,7 +76,7 @@ Revised ordering from Task 9 onward:
 | 1 | Task 14, public profile source | Promoted to primary and substantially enriched. Do this first. |
 | 2 | Task 12, cache, limiter, API key | Unchanged and still correct. |
 | 3 | Task 13, service orchestration | Tier order inverted: public tier first, Voyager only when a session is configured. |
-| 4 | Task 16, container and deployment | Moved earlier. Section 2 says the logged out path is authwalled from datacenters and Railway is a datacenter, so deploying is a test of the primary data path, not packaging. |
+| 4 | Task 16, container and deployment | Moved earlier. Section 2 says the logged out path is authwalled from datacenters and any PaaS host is a datacenter, so deploying is a test of the primary data path, not packaging. Section 8f records the result: it is not authwalled. |
 | 5 | Task 15, integration test | Unchanged. |
 | 6 | Tasks 9, 10, 11, Voyager parsers | Now conditional. Their specs stay correct for the normalized envelope, but they can only be written once Task 7 captures a fixture, which needs a live session. Skip if none is available before the deadline. |
 | 7 | Tasks 17 and 18, README and verification | Unchanged, and the README must carry the section 8d findings. |
@@ -4131,7 +4131,7 @@ git commit -m "test: verify parsers against captured LinkedIn fixtures"
 ### Task 16: Container, CI, and deployment
 
 **Files:**
-- Create: `Dockerfile`, `.dockerignore`, `.github/workflows/ci.yml`, `railway.toml`
+- Create: `Dockerfile`, `.dockerignore`, `.github/workflows/ci.yml`, `render.yaml`
 
 **Interfaces:**
 - Consumes: the completed application
@@ -4202,7 +4202,7 @@ jobs:
       - run: pytest -v
 ```
 
-- [ ] **Step 4: Create `railway.toml`**
+- [ ] **Step 4: Create `render.yaml`**
 
 ```toml
 [build]
@@ -4224,7 +4224,7 @@ sleep 3 && curl -s localhost:8000/health
 ```
 Expected: `{"status":"ok",...}`
 
-- [ ] **Step 6: Deploy to Railway**
+- [ ] **Step 6: Deploy to Render**
 
 Create the project, connect the GitHub repository, add a volume mounted at `/data`, and set the environment variables from `.env.example` as service variables. Set `API_KEYS` to a freshly generated key.
 
@@ -4232,17 +4232,17 @@ Create the project, connect the GitHub repository, add a volume mounted at `/dat
 
 Run:
 ```bash
-curl -s https://<your-app>.up.railway.app/health
+curl -s https://<your-service>.onrender.com/health
 curl -s -H "X-API-Key: <key>" \
-  "https://<your-app>.up.railway.app/api/v1/profile?url=https://www.linkedin.com/in/<slug>"
+  "https://<your-service>.onrender.com/api/v1/profile?url=https://www.linkedin.com/in/<slug>"
 ```
 Expected: health returns `status: ok`; the profile call returns populated JSON.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Dockerfile .dockerignore .github railway.toml
-git commit -m "chore: add container, CI workflow, and Railway deployment config"
+git add Dockerfile .dockerignore .github render.yaml
+git commit -m "containerise the service and add ci"
 ```
 
 ---
@@ -4257,7 +4257,7 @@ git commit -m "chore: add container, CI workflow, and Railway deployment config"
 Include these sections:
 
 1. **Overview** — one paragraph: what the API does and that it reverse engineers LinkedIn's internal Voyager API with no browser involved.
-2. **Live demo** — the Railway URL, the demo API key, a copy-pasteable `curl`, and a link to `/docs` for interactive OpenAPI documentation.
+2. **Live demo** — the Render URL, the demo API key, a copy-pasteable `curl`, and a link to `/docs` for interactive OpenAPI documentation.
 3. **API documentation** — the `GET /api/v1/profile` contract, the `X-API-Key` header, a full example response, the status code table from the spec, and the error body shape.
 4. **How it works** — the auth model (`li_at` is the credential, `JSESSIONID` is a double-submit CSRF token), the four fetch tiers, and the normalized URN graph with a worked before/after example. This is the section that demonstrates understanding; give it real detail.
 5. **Setup** — clone, `pip install -e ".[dev]"`, copy `.env.example` to `.env`, how to obtain `li_at` and the `clientVersion`, `uvicorn app.main:app --reload`, and `pytest`.
