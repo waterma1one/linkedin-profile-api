@@ -70,6 +70,19 @@ async def test_second_call_is_served_from_cache():
 
 
 @respx.mock
+async def test_cache_hit_reports_its_own_duration_not_the_original_fetch():
+    # Reusing the stored duration would tell a caller a cache hit took seconds.
+    respx.get(PROFILE_URL).mock(return_value=httpx.Response(200, text=_HTML))
+    service = _service()
+    first = await service.fetch(PROFILE_URL)
+    second = await service.fetch(PROFILE_URL)
+    assert second.meta.cache_hit is True
+    assert second.meta.duration_ms is not None
+    assert first.meta.duration_ms is not None
+    assert second.meta.duration_ms <= first.meta.duration_ms
+
+
+@respx.mock
 async def test_missing_sections_are_reported_as_unavailable():
     respx.get(PROFILE_URL).mock(return_value=httpx.Response(200, text=_HTML))
     response = await _service().fetch(PROFILE_URL)

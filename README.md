@@ -211,6 +211,10 @@ discards the sections that did parse.
   quick succession from the deployed service is enough to trigger it. The service retries
   twice with a jittered backoff and then reports `bot_detected`. Combined with the six hour
   cache this is fine for sporadic use, but sustained polling will be blocked.
+- The cache lives in the process, so a restart empties it. On a free hosting tier the
+  service sleeps when idle, which means the first request after a cold start is always a
+  live fetch and is the one most likely to meet a 999. Asking again usually succeeds, and a
+  shared cache such as Redis would remove the problem entirely.
 - Non English locale profiles may parse incompletely.
 - Using the internal API is contrary to LinkedIn's Terms of Service. A dedicated throwaway
   account was used throughout, never a primary profile.
