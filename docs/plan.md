@@ -3456,9 +3456,12 @@ sections 8c and 8d.
 
 Two traps worth naming, because both were found the hard way.
 
-`jobTitle` is masked. LinkedIn returns asterisks of the right length, literally
-`["********","*******","**********"]`. Do not map it to `headline` as the original spec
-did. Detect the mask and emit a warning instead of writing rubbish into `Position.title`.
+Masking covers job titles and most company names. LinkedIn returns asterisks of the right
+length, literally `["********","*******","**********"]` for `jobTitle`, and the same for
+`worksFor[].name` on every employer except the current one. Do not map `jobTitle` to
+`headline` as the original spec did, and do not store a masked company name. A masked
+entry has no name, no title and no dates, so drop it and count it in a warning. Expect one
+usable position from this page in practice.
 
 `disambiguatingDescription` is a badge, not an about section. It held `Creator, Top Voice`.
 Do not map it to `about`.

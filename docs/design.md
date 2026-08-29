@@ -421,10 +421,14 @@ Mapping that node onto the required output fields:
 Three details make tier 4 weaker than a first reading of the payload suggests, and all
 three were verified against the raw bytes on disk rather than inferred.
 
-`jobTitle` is masked. LinkedIn returns it as asterisks of the right length and nothing
-else, literally `"jobTitle":["********","*******","**********"]`. Position titles are
-therefore not recoverable from this page, which is the single biggest gap, since an
-experience entry without a title is close to useless.
+Masking is broader than job titles, and it was only caught by running the parser against
+the real page rather than a synthetic fixture. `jobTitle` comes back as asterisks of the
+right length, literally `"jobTitle":["********","*******","**********"]`. Company names in
+`worksFor` are masked the same way for every employer except the current one, so the
+sampled profile disclosed `Gates Foundation` and returned `************ ******` for the
+other two. An entry that is masked has no name, no title and no dates, so it carries
+nothing at all and the parser drops it and counts it in a warning rather than storing a
+row of asterisks. In practice the public page yields one usable position, the current one.
 
 `worksFor[].member` carries no dates. The `OrganizationRole` object is present but empty,
 so employment start and end dates are unavailable. Education is the exception and does
