@@ -14,15 +14,20 @@ GET /api/v1/profile?url=https://www.linkedin.com/in/some-person
 <https://linkedin-profile-api-8f8m.onrender.com>
 
 ```bash
-curl -H "X-API-Key: <key>" \
-  "https://linkedin-profile-api-8f8m.onrender.com/api/v1/profile?url=https://www.linkedin.com/in/williamhgates"
+curl "https://linkedin-profile-api-8f8m.onrender.com/api/v1/profile?url=https://www.linkedin.com/in/williamhgates"
 ```
 
-`/health` needs no key. Interactive OpenAPI documentation is at `/docs`.
+The hosted demo runs with no API key so it can be tried directly. Key checking is built in
+and covered by tests; setting `API_KEYS` on the host turns it on, and every request then
+needs an `X-API-Key` header. Interactive OpenAPI documentation is at `/docs`, and `/health`
+never needs a key either way.
 
-It is on a free tier, so the first request after an idle period wakes the container and
-takes a few seconds. That first request is also a live fetch rather than a cache hit, so
-it is the one most likely to meet LinkedIn's rate limiting; asking again usually succeeds.
+Try `williamhgates` first. It is usually warm in the cache and answers in well under a
+second. An uncached profile is a live fetch, which is slower and is the request most likely
+to meet the rate limiting described under known limitations.
+
+It is on a free tier, so the first request after an idle period also wakes the container,
+which takes twenty seconds or so.
 
 ## Approach
 
@@ -163,12 +168,13 @@ No credentials are committed. `.env` is git ignored and the Docker image exclude
 
 ### `GET /health`
 
-No API key needed. Reports liveness, which auth path is configured, and whether Voyager is
-on. Never returns a credential value.
+No API key needed. Reports liveness and which source profiles are served from. Never
+returns a credential value.
 
 ### `GET /api/v1/profile?url=<profile url>`
 
-Needs `X-API-Key` when `API_KEYS` is set.
+Needs `X-API-Key` when `API_KEYS` is set on the host. The hosted demo leaves it unset so
+the endpoint can be tried without one.
 
 Accepts the URL forms people actually paste: `/in/<slug>`, regional subdomains like
 `in.linkedin.com`, `mwlite` mobile links, legacy `/pub/` URLs, trailing slashes, extra
