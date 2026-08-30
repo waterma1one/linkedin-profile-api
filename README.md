@@ -206,7 +206,7 @@ Errors all come back the same shape:
 | 400 | Not a parseable LinkedIn profile URL, or a missing parameter |
 | 401 | Missing or invalid `X-API-Key` |
 | 404 | No such profile, or it is fully private |
-| 429 | Inbound rate limit tripped, see `Retry-After` |
+| 429 | Rate limited, either by the per-caller cap or the outbound throttle. `Retry-After` says when to return. |
 | 502 | LinkedIn unreachable, or it served an authwall |
 | 503 | No usable session when Voyager is enabled |
 

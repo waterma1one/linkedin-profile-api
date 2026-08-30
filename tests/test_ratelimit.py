@@ -1,3 +1,6 @@
+import pytest
+
+from app.errors import RateLimited
 from app.ratelimit import InboundLimiter, TokenBucket
 
 
@@ -50,3 +53,27 @@ def test_inbound_limiter_window_expires():
     limiter.check("k")
     now[0] = 61.0
     assert limiter.check("k") is None
+
+
+async def test_a_long_wait_raises_rate_limited_instead_of_queueing():
+    async def fake_sleep(seconds: float) -> None:
+        raise AssertionError("should not sleep past max_wait")
+
+    bucket = TokenBucket(rate_seconds=30, burst=1, sleep=fake_sleep, clock=lambda: 0.0)
+    await bucket.acquire(max_wait=10)
+    with pytest.raises(RateLimited) as exc:
+        await bucket.acquire(max_wait=10)
+    # Retry-After must tell the caller when the bucket actually frees up.
+    assert exc.value.retry_after >= 30
+
+
+async def test_a_short_wait_still_sleeps_rather_than_failing():
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    bucket = TokenBucket(rate_seconds=2, burst=1, sleep=fake_sleep, clock=lambda: 0.0)
+    await bucket.acquire(max_wait=10)
+    await bucket.acquire(max_wait=10)
+    assert len(slept) == 1

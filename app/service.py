@@ -40,6 +40,9 @@ PUBLIC_PROFILE = "https://www.linkedin.com/in/{slug}"
 BOT_RETRIES = 3
 BOT_BACKOFF_SECONDS = (2.0, 5.0, 10.0)
 
+# Longest a caller waits on the outbound bucket before getting a 429 instead.
+OUTBOUND_MAX_WAIT_SECONDS = 10.0
+
 
 class ProfileService:
     def __init__(
@@ -103,7 +106,9 @@ class ProfileService:
             response.meta.duration_ms = int((time.monotonic() - started) * 1000)
             return response
 
-        await self._bucket.acquire()
+        # Fail fast rather than queueing. A caller behind a busy bucket gets a 429 telling
+        # them when to return, instead of an HTTP request that hangs for minutes.
+        await self._bucket.acquire(max_wait=OUTBOUND_MAX_WAIT_SECONDS)
         response = await self._fetch_public(slug)
 
         response.meta.requested_url = url

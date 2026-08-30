@@ -10,6 +10,8 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
+from app.errors import RateLimited
+
 
 class TokenBucket:
     def __init__(
@@ -27,13 +29,26 @@ class TokenBucket:
         self._updated = clock()
         self._lock = asyncio.Lock()
 
-    async def acquire(self) -> None:
+    async def acquire(self, max_wait: float | None = None) -> None:
+        """Take a token, waiting if one is not ready yet.
+
+        With ``max_wait`` set, a wait longer than that raises RateLimited instead of
+        sleeping. Callers serving an HTTP request want this: queueing behind a 30 second
+        bucket makes a caller wait minutes with no explanation, where a 429 carrying
+        Retry-After tells them exactly when to come back. That is what design.md section 8
+        specifies.
+        """
         async with self._lock:
             now = self._clock()
             self._tokens = min(self._burst, self._tokens + (now - self._updated) / self._rate)
             self._updated = now
             if self._tokens < 1:
                 wait = (1 - self._tokens) * self._rate
+                if max_wait is not None and wait > max_wait:
+                    raise RateLimited(
+                        f"Outbound rate limit reached, retry in {int(wait) + 1} seconds",
+                        retry_after=int(wait) + 1,
+                    )
                 await self._sleep(wait)
                 self._tokens = 1
             self._tokens -= 1

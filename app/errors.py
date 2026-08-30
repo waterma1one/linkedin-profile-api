@@ -46,6 +46,10 @@ class RateLimited(LinkedInError):
     http_status = 429
     hint = "Slow down and retry after the interval in the Retry-After header."
 
+    def __init__(self, message: str, retry_after: int = 60) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
 
 class BotDetected(LinkedInError):
     code = "bot_detected"

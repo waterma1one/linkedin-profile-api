@@ -51,7 +51,7 @@ def create_app() -> FastAPI:
     async def linkedin_error(request: Request, exc: LinkedInError) -> JSONResponse:
         headers = {}
         if exc.code == "rate_limited":
-            headers["Retry-After"] = "60"
+            headers["Retry-After"] = str(getattr(exc, "retry_after", 60))
         return JSONResponse(
             status_code=exc.http_status,
             content={"error": {"code": exc.code, "message": str(exc), "hint": exc.hint}},
