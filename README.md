@@ -222,10 +222,14 @@ discards the sections that did parse.
   certifications, languages and the about section entirely.
 - Profile image URLs are signed and expire.
 - Out of network members can resolve to "LinkedIn Member" with most fields withheld.
-- LinkedIn answers HTTP 999 when it decides it is talking to a bot, and a few requests in
-  quick succession from the deployed service is enough to trigger it. The service retries
-  twice with a jittered backoff and then reports `bot_detected`. Combined with the six hour
-  cache this is fine for sporadic use, but sustained polling will be blocked.
+- LinkedIn answers HTTP 999 when it decides it is talking to a bot. It is intermittent
+  rather than a lasting block: the same URL was measured returning 999 and then 200 about
+  ten seconds later from the same client. The service retries three times with a jittered
+  backoff of roughly 2, 5 and 10 seconds before reporting `bot_detected`, so a request that
+  meets one can take up to about twenty seconds. Some profiles are blocked more stubbornly
+  than others. Sustained polling will be blocked regardless.
+- The pinned desktop user agent matters. The same request with a default HTTP client user
+  agent is answered with 999 immediately.
 - The cache lives in the process, so a restart empties it. On a free hosting tier the
   service sleeps when idle, which means the first request after a cold start is always a
   live fetch and is the one most likely to meet a 999. Asking again usually succeeds, and a

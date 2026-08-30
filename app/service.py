@@ -28,12 +28,17 @@ from app.ratelimit import TokenBucket
 
 PUBLIC_PROFILE = "https://www.linkedin.com/in/{slug}"
 
-# LinkedIn answers 999 when it thinks it is talking to a bot. Observed from a datacenter
-# IP after a handful of requests in quick succession. Unlike the Voyager path there is no
-# session at stake here, so a short backoff and retry costs nothing and turns a transient
-# block into a slightly slower success.
-BOT_RETRIES = 2
-BOT_BACKOFF_SECONDS = (1.5, 4.0)
+# LinkedIn answers 999 when it thinks it is talking to a bot. It is intermittent rather
+# than a lasting block: the same URL measured 999, then 200 roughly ten seconds later, from
+# the same client and IP. Unlike the Voyager path there is no session at stake here, so
+# waiting costs nothing but latency, and patience converts most failures into successes.
+#
+# The waits are deliberately longer than a first guess would suggest. An earlier version
+# gave up after 1.5 and 4 seconds and still returned 502s against a block that cleared in
+# about ten. Worst case here is roughly 17 seconds plus jitter before reporting failure,
+# which is a better trade than a fast error.
+BOT_RETRIES = 3
+BOT_BACKOFF_SECONDS = (2.0, 5.0, 10.0)
 
 
 class ProfileService:

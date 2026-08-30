@@ -137,7 +137,7 @@ async def test_a_persistent_999_raises_bot_detected_not_a_generic_error():
     with pytest.raises(BotDetected):
         await _service().fetch(PROFILE_URL)
     # One initial attempt plus BOT_RETRIES.
-    assert route.call_count == 3
+    assert route.call_count == 4
 
 
 async def test_a_non_linkedin_url_is_rejected_before_any_request():
